@@ -35,30 +35,47 @@ defmodule Docxelixir do
   end
 
   defp read_zstream(file) do
-    result =
-      file
-      |> File.stream!([], 1024)
-      |> Zstream.unzip()
-      |> Enum.reduce(%{}, fn
-        {:entry, %Zstream.Entry{name: "word/document.xml"}}, state ->
-          state
-          |> Map.put(:in_document, true)
-          |> Map.put(:data, "")
+    try do
+      result =
+        file
+        |> File.stream!([], 1024)
+        |> Zstream.unzip()
+        |> Enum.reduce(%{}, fn
+          {:entry, %Zstream.Entry{name: "word/document.xml"}}, state ->
+            state
+            |> Map.put(:in_document, true)
+            |> Map.put(:data, "")
 
-        {:data, :eof}, %{in_document: true, data: data} ->
-          {:ok, data}
+          {:data, :eof}, %{in_document: true, data: data} ->
+            {:ok, data}
 
-        {:data, data}, %{in_document: true, data: existing_data} = state ->
-          Map.put(state, :data, existing_data <> IO.chardata_to_string(data))
+          {:data, data}, %{in_document: true, data: existing_data} = state ->
+            Map.put(state, :data, existing_data <> IO.chardata_to_string(data))
 
-        _, state ->
-          state
-      end)
+          _, state ->
+            state
+        end)
 
-    if result == %{} do
-      {:error, :no_document}
-    else
-      result
+      if result == %{} do
+        {:error, :no_document}
+      else
+        result
+      end
+    rescue
+      e in _ ->
+        zip_file = Unzip.LocalFile.open(file)
+        {:ok, unzip} = Unzip.new(zip_file)
+        stream = Unzip.file_stream!(unzip, "word/document.xml")
+        result = Stream.map(stream, & &1)
+        result = Enum.to_list(result)
+        |> List.flatten()
+        |> hd
+
+        if result == %{} do
+          {:error, :no_document}
+        else
+          {:ok, result}
+        end
     end
   end
 end
